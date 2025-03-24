@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 
+interface SearchResult {
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
 export async function POST(req: Request) {
   try {
     const { message } = await req.json();
@@ -26,7 +31,8 @@ export async function POST(req: Request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          query: message
+          query: message,
+          n: 5
         })
       }
     );
@@ -41,7 +47,7 @@ export async function POST(req: Request) {
     
     // Construct context from search results
     const context = searchResults.data
-      .map((result: any) => result.content)
+      .map((result: SearchResult) => result.content)
       .join('\n\n');
 
     // Create chat completion with context
