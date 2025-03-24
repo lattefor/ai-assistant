@@ -6,51 +6,63 @@ export async function POST(req: Request) {
     const { message } = await req.json();
 
     console.log("OpenAI API Key:", process.env.OPENAI_API_KEY);
-    console.log("Assistant ID:", process.env.OPENAI_ASSISTANT_ID);
+    console.log("Vector Store ID:", process.env.OPENAI_VECTOR_STORE_ID);
 
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('Missing OPENAI_API_KEY environment variable');
     }
 
-    if (!process.env.OPENAI_ASSISTANT_ID) {
-      throw new Error('Missing OPENAI_ASSISTANT_ID environment variable');
+    if (!process.env.OPENAI_VECTOR_STORE_ID) {
+      throw new Error('Missing OPENAI_VECTOR_STORE_ID environment variable');
     }
 
-    // Create a thread
-    const thread = await openai.beta.threads.create();
+    // Query the vector store for relevant content
+    const searchResponse = await fetch(
+      `https://api.openai.com/v1/vector_stores/${process.env.OPENAI_VECTOR_STORE_ID}/search`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: message
+        })
+      }
+    );
 
-    // Add the user's message to the thread
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: message
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      console.error('Search response error:', errorText);
+      throw new Error(`Vector store query failed: ${searchResponse.statusText}`);
+    }
+
+    const searchResults = await searchResponse.json();
+    
+    // Construct context from search results
+    const context = searchResults.data
+      .map((result: any) => result.content)
+      .join('\n\n');
+
+    // Create chat completion with context
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo-preview",
+      messages: [
+        {
+          role: "system",
+          content: "You are Robbot, an AI assistant specialized in answering questions about SaveABunny. Use the provided knowledge base to answer questions accurately. If the knowledge base doesn't contain relevant information, say so."
+        },
+        {
+          role: "user",
+          content: `Context:\n${context}\n\nQuestion: ${message}`
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
     });
-
-    // Run the assistant
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: process.env.OPENAI_ASSISTANT_ID
-    });
-
-    // Wait for the run to complete
-    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-    while (runStatus.status === 'in_progress') {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-    }
-
-    // Get the assistant's response
-    const messages = await openai.beta.threads.messages.list(thread.id);
-    const lastMessage = messages.data[0];
-    const messageContent = lastMessage.content[0];
-
-    if (messageContent.type !== 'text') {
-      throw new Error('Unexpected message content type');
-    }
-
-    // Clean up
-    await openai.beta.threads.del(thread.id);
 
     return NextResponse.json({
-      message: messageContent.text.value
+      message: completion.choices[0].message.content
     });
   } catch (error) {
     console.error('Error details:', error);

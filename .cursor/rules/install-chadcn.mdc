@@ -1,8 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: false
----
-
-Conver the following command to the updated command
-1. npx install shadcn-ui@latest -> npx shadcn@latest init
